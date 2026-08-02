@@ -66,6 +66,13 @@ puts half the year an hour out and quietly misattributes readings across the mid
 Local columns are derived through the `Australia/Melbourne` zone rather than a fixed offset, and
 [a test pins both sides of the DST switch](tests/test_transform.py).
 
+There's a second, sneakier half to this. DuckDB resolves `TIMESTAMPTZ` against the *session*
+timezone, which it inherits from the host clock — so `extract('hour' FROM local_datetime)` returned
+a Melbourne hour on a Melbourne laptop and a UTC hour on a UTC CI runner, from byte-identical data.
+The quality gate passed locally and failed in CI. The warehouse now pins its session timezone on
+connect, and [the timezone tests](tests/test_timezone.py) run under a forced non-Melbourne `TZ` so
+the discrepancy can't come back unnoticed.
+
 ---
 
 ## Architecture
@@ -297,7 +304,7 @@ outside this pipeline.
 uv run pytest
 ```
 
-60 tests. Every HTTP interaction is mocked with `respx`, so the suite is fast, deterministic, and
+72 tests. Every HTTP interaction is mocked with `respx`, so the suite is fast, deterministic, and
 needs no network — including the retry, timeout, and malformed-payload paths that are impractical
 to trigger against the live API.
 

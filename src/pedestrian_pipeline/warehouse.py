@@ -8,6 +8,7 @@ from types import TracebackType
 import duckdb
 import polars as pl
 
+from pedestrian_pipeline.config import MELBOURNE_TZ
 from pedestrian_pipeline.transform import DIM_COLUMNS, FACT_COLUMNS
 
 logger = logging.getLogger(__name__)
@@ -76,13 +77,26 @@ class Warehouse:
             # impossible for a reader to alter the warehouse.
             if self._read_only:
                 self._connection = duckdb.connect(str(self._database_path), read_only=True)
+                self._pin_timezone()
                 return self._connection
 
             if str(self._database_path) != ":memory:":
                 self._database_path.parent.mkdir(parents=True, exist_ok=True)
             self._connection = duckdb.connect(str(self._database_path))
+            self._pin_timezone()
             self._connection.execute(SCHEMA_SQL)
         return self._connection
+
+    def _pin_timezone(self) -> None:
+        """Render TIMESTAMPTZ in Melbourne time regardless of the host clock.
+
+        DuckDB resolves TIMESTAMPTZ against the session timezone, which it takes
+        from the OS. Left alone, `extract('hour' FROM local_datetime)` returns a
+        Melbourne hour on a Melbourne machine and a UTC hour on a UTC CI runner,
+        so identical data yields different query results per host.
+        """
+        assert self._connection is not None
+        self._connection.execute(f"SET TimeZone = '{MELBOURNE_TZ}'")
 
     def close(self) -> None:
         if self._connection is not None:
