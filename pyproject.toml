@@ -20,6 +20,16 @@ dependencies = [
 ingest = "pedestrian_pipeline.ingestion.run:main"
 report = "pedestrian_pipeline.analytics:main"
 
+[project.optional-dependencies]
+dashboard = [
+    "altair>=6.2.2",
+    "streamlit>=1.59.1",
+]
+screenshots = [
+    "pillow>=12.3.0",
+    "playwright>=1.62.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

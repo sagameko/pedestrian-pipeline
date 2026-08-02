@@ -52,8 +52,9 @@ class LoadResult:
 
 
 class Warehouse:
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, *, read_only: bool = False) -> None:
         self._database_path = database_path
+        self._read_only = read_only
         self._connection: duckdb.DuckDBPyConnection | None = None
 
     def __enter__(self) -> "Warehouse":
@@ -70,6 +71,13 @@ class Warehouse:
 
     def connect(self) -> duckdb.DuckDBPyConnection:
         if self._connection is None:
+            # Read-only lets readers (the dashboard) share the file with a writer
+            # instead of contending for DuckDB's exclusive lock, and makes it
+            # impossible for a reader to alter the warehouse.
+            if self._read_only:
+                self._connection = duckdb.connect(str(self._database_path), read_only=True)
+                return self._connection
+
             if str(self._database_path) != ":memory:":
                 self._database_path.parent.mkdir(parents=True, exist_ok=True)
             self._connection = duckdb.connect(str(self._database_path))
