@@ -1,0 +1,64 @@
+name: Scheduled ingestion
+
+on:
+  schedule:
+    # Hourly, a few minutes past the hour. The source publishes a rolling
+    # window, so each run overlaps the previous one and relies on the
+    # warehouse upsert being idempotent.
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: ingest live sensor readings
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Restore previous warehouse
+        uses: actions/cache/restore@v4
+        with:
+          path: data/pedestrian.duckdb
+          key: warehouse-${{ github.run_id }}
+          restore-keys: warehouse-
+
+      - name: Run pipeline
+        run: uv run ingest --database data/pedestrian.duckdb
+
+      - name: Build report
+        run: |
+          {
+            echo '## Ingestion report'
+            echo
+            echo '```'
+            uv run report --database data/pedestrian.duckdb ingestion_freshness busiest_sensors
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save warehouse
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/pedestrian.duckdb
+          key: warehouse-${{ github.run_id }}
+
+      - name: Upload warehouse artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pedestrian-warehouse
+          path: data/pedestrian.duckdb
+          retention-days: 7
