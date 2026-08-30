@@ -18,6 +18,21 @@ class OpenDataError(RuntimeError):
     """Raised when the API cannot be read after exhausting retries."""
 
 
+class QuotaExceededError(OpenDataError):
+    """Raised when the whole domain's monthly call quota is exhausted.
+
+    Opendatasoft enforces this per-domain, not per-caller: every consumer of
+    data.melbourne.vic.gov.au is rate limited until the quota resets, so
+    retrying is pointless. Callers should treat this as "no data available
+    right now" rather than a pipeline failure.
+    """
+
+    def __init__(self, url: str, reset_time: str | None) -> None:
+        self.reset_time = reset_time
+        suffix = f", resets {reset_time}" if reset_time else ""
+        super().__init__(f"{url}: domain call quota exhausted{suffix}")
+
+
 class MelbourneOpenData:
     """Reads whole datasets from the Explore v2.1 API.
 
@@ -83,6 +98,9 @@ class MelbourneOpenData:
                 last_error = exc
                 continue
 
+            if response.status_code == 429 and (reset_time := self._quota_reset_time(response)):
+                raise QuotaExceededError(url, reset_time)
+
             if response.status_code in RETRYABLE_STATUS:
                 last_error = httpx.HTTPStatusError(
                     f"{response.status_code} from {url}",
@@ -101,6 +119,24 @@ class MelbourneOpenData:
         raise OpenDataError(
             f"{url} failed after {self._settings.max_retries + 1} attempts"
         ) from last_error
+
+    @staticmethod
+    def _quota_reset_time(response: httpx.Response) -> str | None:
+        """Return the reset time if this 429 is a domain-wide quota exhaustion.
+
+        Opendatasoft distinguishes this from an ordinary per-request rate
+        limit via a dedicated error code in the JSON body, e.g.:
+        {"error": "Too many requests on the domain...", "errorcode": 10002,
+        "reset_time": "2026-09-01T00:00:00Z"}
+        """
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        if not isinstance(payload, dict) or payload.get("errorcode") != 10002:
+            return None
+        reset_time = payload.get("reset_time")
+        return reset_time if isinstance(reset_time, str) else "unknown"
 
     @staticmethod
     def _log_rate_limit(response: httpx.Response) -> None:

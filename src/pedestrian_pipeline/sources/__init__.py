@@ -1,3 +1,7 @@
-from pedestrian_pipeline.sources.melbourne import MelbourneOpenData, OpenDataError
+from pedestrian_pipeline.sources.melbourne import (
+    MelbourneOpenData,
+    OpenDataError,
+    QuotaExceededError,
+)
 
-__all__ = ["MelbourneOpenData", "OpenDataError"]
+__all__ = ["MelbourneOpenData", "OpenDataError", "QuotaExceededError"]

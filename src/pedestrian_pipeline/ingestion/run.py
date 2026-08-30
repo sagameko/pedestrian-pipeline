@@ -15,7 +15,7 @@ from pedestrian_pipeline.models import (
     utcnow,
 )
 from pedestrian_pipeline.quality import QualityReport, run_checks
-from pedestrian_pipeline.sources import MelbourneOpenData
+from pedestrian_pipeline.sources import MelbourneOpenData, QuotaExceededError
 from pedestrian_pipeline.transform import build_dim_sensor, build_fact_counts
 from pedestrian_pipeline.warehouse import Warehouse
 
@@ -108,8 +108,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.database:
         settings = settings.model_copy(update={"database_path": args.database})
 
-    with Warehouse(settings.database_path) as warehouse, MelbourneOpenData(settings) as source:
-        summary = ingest(settings, warehouse, source)
+    try:
+        with Warehouse(settings.database_path) as warehouse, MelbourneOpenData(settings) as source:
+            summary = ingest(settings, warehouse, source)
+    except QuotaExceededError as exc:
+        # The source's whole domain is out of quota for every caller, not just
+        # us; retrying or failing the run wouldn't help. Skip this run and let
+        # the next scheduled run try again after the quota resets.
+        logger.warning("skipping run: %s", exc)
+        return 0
 
     print(summary.render())
 

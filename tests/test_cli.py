@@ -47,6 +47,28 @@ def test_ingest_cli_exits_non_zero_when_the_quality_gate_fails(tmp_path, capsys)
     assert "ERROR" in capsys.readouterr().out
 
 
+def test_ingest_cli_exits_zero_when_the_domain_quota_is_exhausted(tmp_path, caplog):
+    settings = Settings()
+    database = tmp_path / "pedestrian.duckdb"
+    quota_response = httpx.Response(
+        429,
+        json={
+            "error": "Too many requests on the domain. Please contact the domain administrator.",
+            "errorcode": 10002,
+            "reset_time": "2026-09-01T00:00:00Z",
+        },
+    )
+
+    with respx.mock:
+        respx.get(settings.dataset_export_url(settings.sensors_dataset)).mock(
+            return_value=quota_response
+        )
+        exit_code = ingest_main(["--database", str(database), "--log-level", "WARNING"])
+
+    assert exit_code == 0
+    assert "skipping run" in caplog.text
+
+
 def test_report_cli_prints_query_results(tmp_path, api, capsys):
     database = tmp_path / "pedestrian.duckdb"
     ingest_main(["--database", str(database), "--log-level", "ERROR"])
