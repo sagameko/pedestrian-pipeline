@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from pedestrian_pipeline.sources import MelbourneOpenData, OpenDataError
+from pedestrian_pipeline.sources import MelbourneOpenData, OpenDataError, QuotaExceededError
 
 DATASET = "pedestrian-counting-system-past-hour-counts-per-minute"
 
@@ -54,6 +54,38 @@ def test_gives_up_after_exhausting_retries(settings):
 
     with MelbourneOpenData(settings) as source, pytest.raises(OpenDataError, match="after 3"):
         source.fetch_dataset(DATASET)
+
+
+@respx.mock
+def test_stops_immediately_when_the_domain_quota_is_exhausted(settings):
+    route = respx.get(export_url(settings)).mock(
+        return_value=httpx.Response(
+            429,
+            json={
+                "error": "Too many requests on the domain. Please contact the domain administrator.",
+                "errorcode": 10002,
+                "reset_time": "2026-09-01T00:00:00Z",
+                "call_limit": 6000000,
+                "limit_time_unit": "month",
+            },
+        )
+    )
+
+    with MelbourneOpenData(settings) as source, pytest.raises(QuotaExceededError) as exc_info:
+        source.fetch_dataset(DATASET)
+
+    assert route.call_count == 1
+    assert exc_info.value.reset_time == "2026-09-01T00:00:00Z"
+
+
+@respx.mock
+def test_an_ordinary_rate_limit_still_retries(settings, raw_count):
+    respx.get(export_url(settings)).mock(
+        side_effect=[httpx.Response(429), httpx.Response(200, json=[raw_count])]
+    )
+
+    with MelbourneOpenData(settings) as source:
+        assert source.fetch_dataset(DATASET) == [raw_count]
 
 
 @respx.mock
